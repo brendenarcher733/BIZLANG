@@ -1,0 +1,17 @@
+month,region,revenue,units
+Jan,South,100,10
+Jan,North,120,14
+Jan,East,95,9
+Jan,West,110,12
+Feb,South,90,8
+Feb,North,140,16
+Feb,East,105,11
+Feb,West,130,15
+Mar,South,150,18
+Mar,North,160,19
+Mar,East,120,13
+Mar,West,175,20
+Apr,South,200,24
+Apr,North,180,21
+Apr,East,145,16
+Apr,West,190,22
