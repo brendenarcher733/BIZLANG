@@ -147,6 +147,11 @@ load sample_data/sales.csv | filter region = South | group by month | sum revenu
 ---
 
 ## Example Output
+Step 1: load sample_data/sales.csv
+Step 2: filter region = South
+Step 3: group by month
+Step 4: sum revenue
+Step 5: chart bar month revenue
 
 ### Parser output
 
