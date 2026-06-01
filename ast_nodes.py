@@ -1,19 +1,24 @@
-# ast_nodes.py
-# ─────────────────────────────────────────────────────────────────────────────
-# AST Node definitions for BizLang.
-#
-# Each class represents one command in the pipeline.
-# They are plain Python dataclasses — no magic, easy to inspect and print.
-# ─────────────────────────────────────────────────────────────────────────────
+from dataclasses import dataclass
+from typing import List, Optional
+
+
+@dataclass
+class Condition:
+    """A single predicate used inside a FilterNode."""
+    column:   str
+    operator: str
+    value:    str
+
+    def to_dict(self) -> dict:
+        return {"column": self.column, "operator": self.operator, "value": self.value}
+
+    def __repr__(self) -> str:
+        return f"{self.column} {self.operator} {self.value}"
 
 
 class LoadNode:
-    """
-    Represents:  load <filename>
-    Example:     load sales.csv
-    """
     def __init__(self, filename: str):
-        self.filename = filename          # e.g. "sales.csv"
+        self.filename = filename
 
     def to_dict(self) -> dict:
         return {"node": "LoadNode", "filename": self.filename}
@@ -23,36 +28,26 @@ class LoadNode:
 
 
 class FilterNode:
-    """
-    Represents:  filter <column> = <value>
-    Example:     filter region = South
-
-    Supports operators: =  !=  >  <  >=  <=
-    """
-    def __init__(self, column: str, operator: str, value: str):
-        self.column   = column            # e.g. "region"
-        self.operator = operator          # e.g. "="
-        self.value    = value             # e.g. "South"
+    """One or more filter conditions joined by a single logic connector (AND / OR)."""
+    def __init__(self, conditions: List[Condition], logic: str = "AND"):
+        self.conditions = conditions
+        self.logic = logic.upper()
 
     def to_dict(self) -> dict:
         return {
-            "node":     "FilterNode",
-            "column":   self.column,
-            "operator": self.operator,
-            "value":    self.value,
+            "node":       "FilterNode",
+            "logic":      self.logic,
+            "conditions": [c.to_dict() for c in self.conditions],
         }
 
     def __repr__(self) -> str:
-        return f"FilterNode(column='{self.column}', operator='{self.operator}', value='{self.value}')"
+        parts = f" {self.logic} ".join(repr(c) for c in self.conditions)
+        return f"FilterNode({parts})"
 
 
 class GroupByNode:
-    """
-    Represents:  group by <column>
-    Example:     group by month
-    """
     def __init__(self, column: str):
-        self.column = column              # e.g. "month"
+        self.column = column
 
     def to_dict(self) -> dict:
         return {"node": "GroupByNode", "column": self.column}
@@ -62,38 +57,57 @@ class GroupByNode:
 
 
 class AggregateNode:
-    """
-    Represents:  sum <column>  |  avg <column>  |  count <column>
-    Example:     sum revenue
-
-    The function field holds the aggregation type: "sum", "avg", or "count".
-    """
     def __init__(self, function: str, column: str):
-        self.function = function          # "sum" | "avg" | "count"
-        self.column   = column            # e.g. "revenue"
+        self.function = function   # "sum" | "avg" | "count"
+        self.column   = column
 
     def to_dict(self) -> dict:
-        return {
-            "node":     "AggregateNode",
-            "function": self.function,
-            "column":   self.column,
-        }
+        return {"node": "AggregateNode", "function": self.function, "column": self.column}
 
     def __repr__(self) -> str:
         return f"AggregateNode(function='{self.function}', column='{self.column}')"
 
 
-class ChartNode:
-    """
-    Represents:  chart <type> <x_column> <y_column>
-    Example:     chart bar month revenue
+class SortNode:
+    def __init__(self, column: str, order: str = "asc"):
+        self.column = column
+        self.order  = order.lower()   # "asc" | "desc"
 
-    Supported chart types: bar, line, pie
-    """
+    def to_dict(self) -> dict:
+        return {"node": "SortNode", "column": self.column, "order": self.order}
+
+    def __repr__(self) -> str:
+        return f"SortNode(column='{self.column}', order='{self.order}')"
+
+
+class DisplayNode:
+    def __init__(self, limit: Optional[int] = None):
+        self.limit = limit   # None means all rows
+
+    def to_dict(self) -> dict:
+        return {"node": "DisplayNode", "limit": self.limit}
+
+    def __repr__(self) -> str:
+        return f"DisplayNode(limit={self.limit!r})"
+
+
+class ExportNode:
+    def __init__(self, filename: str, fmt: str = "csv"):
+        self.filename = filename
+        self.fmt      = fmt.lower()   # "csv" | "json"
+
+    def to_dict(self) -> dict:
+        return {"node": "ExportNode", "filename": self.filename, "format": self.fmt}
+
+    def __repr__(self) -> str:
+        return f"ExportNode(filename='{self.filename}', format='{self.fmt}')"
+
+
+class ChartNode:
     def __init__(self, chart_type: str, x_column: str, y_column: str):
-        self.chart_type = chart_type      # "bar" | "line" | "pie"
-        self.x_column   = x_column        # column for the x-axis
-        self.y_column   = y_column        # column for the y-axis
+        self.chart_type = chart_type   # "bar" | "line" | "pie"
+        self.x_column   = x_column
+        self.y_column   = y_column
 
     def to_dict(self) -> dict:
         return {
@@ -108,20 +122,16 @@ class ChartNode:
 
 
 class PipelineNode:
-    """
-    The root AST node.
-    Holds an ordered list of all parsed command nodes.
-    The code generator walks this list top-to-bottom.
-    """
+    """Root AST node — an ordered list of all pipeline steps."""
     def __init__(self, steps: list):
-        self.steps = steps                # list of Node objects in order
+        self.steps = steps
 
     def to_dict(self) -> dict:
         return {
             "node":  "PipelineNode",
-            "steps": [step.to_dict() for step in self.steps],
+            "steps": [s.to_dict() for s in self.steps],
         }
 
     def __repr__(self) -> str:
-        steps_repr = "\n  ".join(repr(s) for s in self.steps)
-        return f"PipelineNode(\n  {steps_repr}\n)"
+        parts = "\n  ".join(repr(s) for s in self.steps)
+        return f"PipelineNode(\n  {parts}\n)"

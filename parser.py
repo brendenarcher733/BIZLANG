@@ -1,221 +1,287 @@
-# parser.py
-# ─────────────────────────────────────────────────────────────────────────────
-# BizLang Parser
-#
-# Strategy:
-#   1. Split the full input string on "|" to get individual command strings.
-#   2. Strip and lowercase each command to identify its type.
-#   3. Dispatch to a dedicated parse function that validates the command
-#      and returns the correct AST node.
-#   4. Wrap all nodes in a PipelineNode and return it.
-#
-# No external libraries — just Python string operations.
-# ─────────────────────────────────────────────────────────────────────────────
-
+from lexer import tokenize, Token, TokenType, LexError
 from ast_nodes import (
-    LoadNode, FilterNode, GroupByNode,
-    AggregateNode, ChartNode, PipelineNode,
+    Condition, LoadNode, FilterNode, GroupByNode, AggregateNode,
+    SortNode, DisplayNode, ExportNode, ChartNode, PipelineNode,
 )
 
 
-# ── Supported filter operators (order matters — longer first to avoid partial match) ──
-FILTER_OPERATORS = ["!=", ">=", "<=", "=", ">", "<"]
-
-# ── Supported aggregation keywords ────────────────────────────────────────────
-AGGREGATE_FUNCTIONS = ["sum", "avg", "count"]
-
-# ── Supported chart types ──────────────────────────────────────────────────────
-CHART_TYPES = ["bar", "line", "pie"]
-
-
 class ParseError(Exception):
-    """Raised when BizLang input does not match the grammar."""
     pass
 
 
-# ── Individual command parsers ─────────────────────────────────────────────────
+# Token types that are valid in column-name / value positions.
+# Excludes AND, OR (logic connectors) and structural tokens.
+_WORD_TYPES = {
+    TokenType.IDENTIFIER, TokenType.NUMBER,
+    TokenType.LOAD, TokenType.FILTER, TokenType.GROUP, TokenType.BY,
+    TokenType.SUM, TokenType.AVG, TokenType.COUNT,
+    TokenType.SORT, TokenType.DISPLAY, TokenType.EXPORT, TokenType.CHART,
+    TokenType.ASC, TokenType.DESC,
+}
 
-def parse_load(tokens: list[str]) -> LoadNode:
-    """
-    Grammar:  load <filename>
-    Tokens:   ["load", "sales.csv"]
-    """
-    if len(tokens) != 2:
+_OPERATOR_TYPES = {
+    TokenType.EQ, TokenType.NEQ,
+    TokenType.GT, TokenType.LT,
+    TokenType.GTE, TokenType.LTE,
+}
+
+_AGGREGATE_KEYWORDS = {TokenType.SUM, TokenType.AVG, TokenType.COUNT}
+_CHART_TYPES        = {"bar", "line", "pie"}
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _split_on_pipe(tokens: list[Token]) -> list[list[Token]]:
+    """Partition a flat token list into command segments on PIPE boundaries."""
+    segments: list[list[Token]] = []
+    current:  list[Token]       = []
+    for tok in tokens:
+        if tok.type is TokenType.EOF:
+            break
+        if tok.type is TokenType.PIPE:
+            if current:
+                segments.append(current)
+            current = []
+        else:
+            current.append(tok)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _word(tok: Token, context: str) -> str:
+    """Assert token is usable as an identifier and return its value."""
+    if tok.type not in _WORD_TYPES:
+        raise ParseError(f"{context}: expected a name or value, got '{tok.value}'")
+    return tok.value
+
+
+# ── Command parsers ───────────────────────────────────────────────────────────
+
+def _parse_load(toks: list[Token], step: int) -> LoadNode:
+    if len(toks) != 2:
         raise ParseError(
-            f"'load' expects exactly one argument (a filename).\n"
-            f"  Got: {' '.join(tokens)}\n"
-            f"  Expected: load <filename>"
+            f"Step {step} · load: expected exactly one filename.\n"
+            f"  Example: load sales.csv"
         )
-    filename = tokens[1]
+    filename = toks[1].value
     if not filename.endswith(".csv"):
         raise ParseError(
-            f"'load' only supports .csv files. Got: '{filename}'"
+            f"Step {step} · load: only .csv files are supported. Got '{filename}'"
         )
     return LoadNode(filename=filename)
 
 
-def parse_filter(tokens: list[str]) -> FilterNode:
+def _parse_filter(toks: list[Token], step: int) -> FilterNode:
     """
-    Grammar:  filter <column> <operator> <value>
-    Tokens:   ["filter", "region", "=", "South"]
-
-    We rejoin everything after "filter" and then scan for a known operator
-    so that column names or values with spaces still work.
+    Grammar:  filter <col> <op> <val> [ (AND|OR) <col> <op> <val> … ]
+    All conditions must share the same logic connector.
     """
-    # Rejoin everything after the keyword and scan for an operator
-    expression = " ".join(tokens[1:])
+    ctx = f"Step {step} · filter"
+    conditions: list[Condition] = []
+    logic = "AND"
+    i = 1  # skip FILTER keyword
 
-    found_op = None
-    for op in FILTER_OPERATORS:
-        if op in expression:
-            found_op = op
-            break
+    while i < len(toks):
+        if len(toks) - i < 3:
+            raise ParseError(
+                f"{ctx}: incomplete condition starting at token {i+1}.\n"
+                f"  Expected: <column> <operator> <value>"
+            )
+        col_tok = toks[i]
+        op_tok  = toks[i + 1]
+        val_tok = toks[i + 2]
 
-    if found_op is None:
+        if col_tok.type not in _WORD_TYPES:
+            raise ParseError(f"{ctx}: expected a column name, got '{col_tok.value}'")
+        if op_tok.type not in _OPERATOR_TYPES:
+            raise ParseError(
+                f"{ctx}: expected an operator (=, !=, >, <, >=, <=), got '{op_tok.value}'"
+            )
+        if val_tok.type not in _WORD_TYPES:
+            raise ParseError(f"{ctx}: expected a value, got '{val_tok.value}'")
+
+        conditions.append(Condition(col_tok.value, op_tok.value, val_tok.value))
+        i += 3
+
+        if i < len(toks):
+            if toks[i].type is TokenType.AND:
+                logic = "AND"
+                i += 1
+            elif toks[i].type is TokenType.OR:
+                logic = "OR"
+                i += 1
+            else:
+                raise ParseError(
+                    f"{ctx}: expected 'AND' or 'OR' between conditions, got '{toks[i].value}'"
+                )
+
+    if not conditions:
+        raise ParseError(f"{ctx}: at least one condition is required.\n  Example: filter region = West")
+
+    return FilterNode(conditions=conditions, logic=logic)
+
+
+def _parse_group_by(toks: list[Token], step: int) -> GroupByNode:
+    if len(toks) < 3 or toks[1].type is not TokenType.BY:
         raise ParseError(
-            f"'filter' requires an operator ({', '.join(FILTER_OPERATORS)}).\n"
-            f"  Got: filter {expression}\n"
-            f"  Example: filter region = South"
-        )
-
-    # Split on the operator (max 1 split so value can contain the char)
-    parts = expression.split(found_op, 1)
-    column = parts[0].strip()
-    value  = parts[1].strip()
-
-    if not column:
-        raise ParseError("'filter' is missing a column name.")
-    if not value:
-        raise ParseError("'filter' is missing a value.")
-
-    return FilterNode(column=column, operator=found_op, value=value)
-
-
-def parse_group_by(tokens: list[str]) -> GroupByNode:
-    """
-    Grammar:  group by <column>
-    Tokens:   ["group", "by", "month"]
-    """
-    # tokens[0] == "group", tokens[1] should == "by"
-    if len(tokens) < 3 or tokens[1].lower() != "by":
-        raise ParseError(
-            f"'group by' syntax error.\n"
-            f"  Got: {' '.join(tokens)}\n"
+            f"Step {step} · group by: syntax error.\n"
             f"  Expected: group by <column>"
         )
-    column = tokens[2]
-    return GroupByNode(column=column)
+    return GroupByNode(column=_word(toks[2], f"Step {step} · group by"))
 
 
-def parse_aggregate(tokens: list[str]) -> AggregateNode:
-    """
-    Grammar:  sum <column>  |  avg <column>  |  count <column>
-    Tokens:   ["sum", "revenue"]
-    """
-    func = tokens[0].lower()
-    if func not in AGGREGATE_FUNCTIONS:
-        raise ParseError(f"Unknown aggregation function: '{func}'")
-
-    if len(tokens) != 2:
+def _parse_aggregate(toks: list[Token], step: int) -> AggregateNode:
+    func = toks[0].value.lower()
+    if len(toks) != 2:
         raise ParseError(
-            f"'{func}' expects exactly one column argument.\n"
-            f"  Got: {' '.join(tokens)}\n"
+            f"Step {step} · {func}: expected exactly one column name.\n"
             f"  Example: {func} revenue"
         )
-    column = tokens[1]
-    return AggregateNode(function=func, column=column)
+    return AggregateNode(function=func, column=_word(toks[1], f"Step {step} · {func}"))
 
 
-def parse_chart(tokens: list[str]) -> ChartNode:
-    """
-    Grammar:  chart <type> <x_column> <y_column>
-    Tokens:   ["chart", "bar", "month", "revenue"]
-    """
-    if len(tokens) != 4:
+def _parse_sort(toks: list[Token], step: int) -> SortNode:
+    if len(toks) < 2:
         raise ParseError(
-            f"'chart' expects: chart <type> <x_column> <y_column>.\n"
-            f"  Got: {' '.join(tokens)}\n"
+            f"Step {step} · sort: expected a column name.\n"
+            f"  Example: sort revenue desc"
+        )
+    column = _word(toks[1], f"Step {step} · sort")
+    order  = "asc"
+    if len(toks) >= 3:
+        if toks[2].type is TokenType.DESC:
+            order = "desc"
+        elif toks[2].type is TokenType.ASC:
+            order = "asc"
+        else:
+            raise ParseError(
+                f"Step {step} · sort: order must be 'asc' or 'desc', got '{toks[2].value}'"
+            )
+    return SortNode(column=column, order=order)
+
+
+def _parse_display(toks: list[Token], step: int) -> DisplayNode:
+    if len(toks) == 1:
+        return DisplayNode(limit=None)
+    if len(toks) == 2:
+        if toks[1].type is not TokenType.NUMBER:
+            raise ParseError(f"Step {step} · display: row limit must be a number.")
+        return DisplayNode(limit=int(float(toks[1].value)))
+    raise ParseError(
+        f"Step {step} · display: too many arguments.\n"
+        f"  Example: display   or   display 10"
+    )
+
+
+def _parse_export(toks: list[Token], step: int) -> ExportNode:
+    if len(toks) != 2:
+        raise ParseError(
+            f"Step {step} · export: expected a filename.\n"
+            f"  Example: export results.csv"
+        )
+    filename = toks[1].value
+    fmt = "json" if filename.endswith(".json") else "csv"
+    return ExportNode(filename=filename, fmt=fmt)
+
+
+def _parse_chart(toks: list[Token], step: int) -> ChartNode:
+    if len(toks) != 4:
+        raise ParseError(
+            f"Step {step} · chart: expected: chart <type> <x_column> <y_column>.\n"
             f"  Example: chart bar month revenue"
         )
-    chart_type = tokens[1].lower()
-    if chart_type not in CHART_TYPES:
+    chart_type = toks[1].value.lower()
+    if chart_type not in _CHART_TYPES:
         raise ParseError(
-            f"Unknown chart type: '{chart_type}'.\n"
-            f"  Supported types: {', '.join(CHART_TYPES)}"
+            f"Step {step} · chart: unsupported type '{chart_type}'.\n"
+            f"  Supported: {', '.join(sorted(_CHART_TYPES))}"
         )
-    return ChartNode(chart_type=chart_type, x_column=tokens[2], y_column=tokens[3])
+    return ChartNode(
+        chart_type=chart_type,
+        x_column=_word(toks[2], f"Step {step} · chart x"),
+        y_column=_word(toks[3], f"Step {step} · chart y"),
+    )
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
-def parse_command(raw_command: str, step_number: int) -> object:
-    """
-    Given a single raw command string (already split from the pipeline),
-    identify its type and return the corresponding AST node.
-    """
-    # Tokenise by splitting on whitespace
-    tokens = raw_command.strip().split()
+def _parse_segment(toks: list[Token], step: int) -> object:
+    if not toks:
+        raise ParseError(f"Step {step}: empty command.")
 
-    if not tokens:
-        raise ParseError(f"Step {step_number}: empty command.")
+    kw = toks[0].type
 
-    keyword = tokens[0].lower()
-
-    print(f"  Step {step_number}: parsing '{keyword}' command → tokens: {tokens}")
-
-    if keyword == "load":
-        return parse_load(tokens)
-    elif keyword == "filter":
-        return parse_filter(tokens)
-    elif keyword == "group":
-        return parse_group_by(tokens)
-    elif keyword in AGGREGATE_FUNCTIONS:
-        return parse_aggregate(tokens)
-    elif keyword == "chart":
-        return parse_chart(tokens)
+    if kw is TokenType.LOAD:
+        return _parse_load(toks, step)
+    elif kw is TokenType.FILTER:
+        return _parse_filter(toks, step)
+    elif kw is TokenType.GROUP:
+        return _parse_group_by(toks, step)
+    elif kw in _AGGREGATE_KEYWORDS:
+        return _parse_aggregate(toks, step)
+    elif kw is TokenType.SORT:
+        return _parse_sort(toks, step)
+    elif kw is TokenType.DISPLAY:
+        return _parse_display(toks, step)
+    elif kw is TokenType.EXPORT:
+        return _parse_export(toks, step)
+    elif kw is TokenType.CHART:
+        return _parse_chart(toks, step)
     else:
         raise ParseError(
-            f"Step {step_number}: unknown command keyword '{keyword}'.\n"
-            f"  Supported: load, filter, group by, sum, avg, count, chart"
+            f"Step {step}: unknown command '{toks[0].value}'.\n"
+            f"  Supported: load  filter  group by  sum  avg  count  "
+            f"sort  display  export  chart"
         )
 
 
-# ── Main entry point ──────────────────────────────────────────────────────────
+# ── Semantic validation ───────────────────────────────────────────────────────
+
+def validate(pipeline: PipelineNode) -> None:
+    """Raise ParseError if the pipeline violates semantic rules."""
+    steps = pipeline.steps
+    if not steps:
+        raise ParseError("Pipeline is empty.")
+
+    if not isinstance(steps[0], LoadNode):
+        raise ParseError(
+            f"Every pipeline must begin with 'load'.\n"
+            f"  Got: {type(steps[0]).__name__}"
+        )
+
+    # CHART must be the last step (if present anywhere)
+    for step in steps[:-1]:
+        if isinstance(step, ChartNode):
+            raise ParseError("'chart' must be the last command in the pipeline.")
+
+    # GROUP BY must precede any aggregation
+    seen_agg = False
+    for step in steps:
+        if isinstance(step, AggregateNode):
+            seen_agg = True
+        if isinstance(step, GroupByNode) and seen_agg:
+            raise ParseError("'group by' must come before 'sum', 'avg', or 'count'.")
+
+
+# ── Public entry point ────────────────────────────────────────────────────────
 
 def parse(source: str) -> PipelineNode:
     """
-    Parse a full BizLang pipeline string and return a PipelineNode AST.
+    Tokenize and parse a BizLang pipeline string.
 
-    Args:
-        source: The complete BizLang expression, e.g.
-                "load sales.csv | filter region = South | sum revenue"
-
-    Returns:
-        A PipelineNode containing all parsed step nodes in order.
-
-    Raises:
-        ParseError: if any step does not match the grammar.
+    Returns a PipelineNode, or raises ParseError / LexError on invalid input.
     """
-    print("\n── Parsing BizLang Input ──────────────────────────────────────")
-    print(f"  Input: {source.strip()}\n")
+    try:
+        tokens = tokenize(source)
+    except LexError as e:
+        raise ParseError(f"Tokenization failed: {e}") from e
 
-    # Step 1: Split into individual commands on the pipe character
-    raw_commands = source.strip().split("|")
-
-    if not raw_commands:
+    segments = _split_on_pipe(tokens)
+    if not segments:
         raise ParseError("Input is empty — nothing to parse.")
 
-    print(f"  Found {len(raw_commands)} pipeline step(s):")
-
-    # Step 2: Parse each command into an AST node
-    steps = []
-    for i, raw in enumerate(raw_commands, start=1):
-        node = parse_command(raw.strip(), i)
-        steps.append(node)
-        print(f"    → {repr(node)}")
-
-    print()
-
-    # Step 3: Wrap in a PipelineNode
+    steps = [_parse_segment(seg, i + 1) for i, seg in enumerate(segments)]
     pipeline = PipelineNode(steps=steps)
+    validate(pipeline)
     return pipeline
