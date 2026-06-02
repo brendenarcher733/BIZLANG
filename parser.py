@@ -6,7 +6,9 @@ from ast_nodes import (
 
 
 class ParseError(Exception):
-    pass
+    def __init__(self, message: str, pos: int = -1):
+        super().__init__(message)
+        self.pos = pos
 
 
 # Token types that are valid in column-name / value positions.
@@ -52,7 +54,7 @@ def _split_on_pipe(tokens: list[Token]) -> list[list[Token]]:
 def _word(tok: Token, context: str) -> str:
     """Assert token is usable as an identifier and return its value."""
     if tok.type not in _WORD_TYPES:
-        raise ParseError(f"{context}: expected a name or value, got '{tok.value}'")
+        raise ParseError(f"{context}: expected a name or value, got '{tok.value}'", pos=tok.pos)
     return tok.value
 
 
@@ -62,12 +64,14 @@ def _parse_load(toks: list[Token], step: int) -> LoadNode:
     if len(toks) != 2:
         raise ParseError(
             f"Step {step} · load: expected exactly one filename.\n"
-            f"  Example: load sales.csv"
+            f"  Example: load sales.csv",
+            pos=toks[0].pos,
         )
     filename = toks[1].value
     if not filename.endswith(".csv"):
         raise ParseError(
-            f"Step {step} · load: only .csv files are supported. Got '{filename}'"
+            f"Step {step} · load: only .csv files are supported. Got '{filename}'",
+            pos=toks[1].pos,
         )
     return LoadNode(filename=filename)
 
@@ -84,22 +88,30 @@ def _parse_filter(toks: list[Token], step: int) -> FilterNode:
 
     while i < len(toks):
         if len(toks) - i < 3:
+            bad = toks[min(i + 1, len(toks) - 1)]
             raise ParseError(
-                f"{ctx}: incomplete condition starting at token {i+1}.\n"
-                f"  Expected: <column> <operator> <value>"
+                f"{ctx}: incomplete condition — expected <column> <operator> <value>",
+                pos=bad.pos,
             )
         col_tok = toks[i]
         op_tok  = toks[i + 1]
         val_tok = toks[i + 2]
 
         if col_tok.type not in _WORD_TYPES:
-            raise ParseError(f"{ctx}: expected a column name, got '{col_tok.value}'")
+            raise ParseError(
+                f"{ctx}: expected a column name, got '{col_tok.value}'",
+                pos=col_tok.pos,
+            )
         if op_tok.type not in _OPERATOR_TYPES:
             raise ParseError(
-                f"{ctx}: expected an operator (=, !=, >, <, >=, <=), got '{op_tok.value}'"
+                f"{ctx}: expected an operator (=, !=, >, <, >=, <=), got '{op_tok.value}'",
+                pos=op_tok.pos,
             )
         if val_tok.type not in _WORD_TYPES:
-            raise ParseError(f"{ctx}: expected a value, got '{val_tok.value}'")
+            raise ParseError(
+                f"{ctx}: expected a value, got '{val_tok.value}'",
+                pos=val_tok.pos,
+            )
 
         conditions.append(Condition(col_tok.value, op_tok.value, val_tok.value))
         i += 3
@@ -113,11 +125,15 @@ def _parse_filter(toks: list[Token], step: int) -> FilterNode:
                 i += 1
             else:
                 raise ParseError(
-                    f"{ctx}: expected 'AND' or 'OR' between conditions, got '{toks[i].value}'"
+                    f"{ctx}: expected 'AND' or 'OR' between conditions, got '{toks[i].value}'",
+                    pos=toks[i].pos,
                 )
 
     if not conditions:
-        raise ParseError(f"{ctx}: at least one condition is required.\n  Example: filter region = West")
+        raise ParseError(
+            f"{ctx}: at least one condition is required.\n  Example: filter region = West",
+            pos=toks[0].pos,
+        )
 
     return FilterNode(conditions=conditions, logic=logic)
 
@@ -126,7 +142,8 @@ def _parse_group_by(toks: list[Token], step: int) -> GroupByNode:
     if len(toks) < 3 or toks[1].type is not TokenType.BY:
         raise ParseError(
             f"Step {step} · group by: syntax error.\n"
-            f"  Expected: group by <column>"
+            f"  Expected: group by <column>",
+            pos=toks[0].pos,
         )
     return GroupByNode(column=_word(toks[2], f"Step {step} · group by"))
 
@@ -136,7 +153,8 @@ def _parse_aggregate(toks: list[Token], step: int) -> AggregateNode:
     if len(toks) != 2:
         raise ParseError(
             f"Step {step} · {func}: expected exactly one column name.\n"
-            f"  Example: {func} revenue"
+            f"  Example: {func} revenue",
+            pos=toks[0].pos,
         )
     return AggregateNode(function=func, column=_word(toks[1], f"Step {step} · {func}"))
 
@@ -145,7 +163,8 @@ def _parse_sort(toks: list[Token], step: int) -> SortNode:
     if len(toks) < 2:
         raise ParseError(
             f"Step {step} · sort: expected a column name.\n"
-            f"  Example: sort revenue desc"
+            f"  Example: sort revenue desc",
+            pos=toks[0].pos,
         )
     column = _word(toks[1], f"Step {step} · sort")
     order  = "asc"
@@ -156,7 +175,8 @@ def _parse_sort(toks: list[Token], step: int) -> SortNode:
             order = "asc"
         else:
             raise ParseError(
-                f"Step {step} · sort: order must be 'asc' or 'desc', got '{toks[2].value}'"
+                f"Step {step} · sort: order must be 'asc' or 'desc', got '{toks[2].value}'",
+                pos=toks[2].pos,
             )
     return SortNode(column=column, order=order)
 
@@ -166,11 +186,15 @@ def _parse_display(toks: list[Token], step: int) -> DisplayNode:
         return DisplayNode(limit=None)
     if len(toks) == 2:
         if toks[1].type is not TokenType.NUMBER:
-            raise ParseError(f"Step {step} · display: row limit must be a number.")
+            raise ParseError(
+                f"Step {step} · display: row limit must be a number, got '{toks[1].value}'",
+                pos=toks[1].pos,
+            )
         return DisplayNode(limit=int(float(toks[1].value)))
     raise ParseError(
         f"Step {step} · display: too many arguments.\n"
-        f"  Example: display   or   display 10"
+        f"  Example: display   or   display 10",
+        pos=toks[2].pos,
     )
 
 
@@ -178,7 +202,8 @@ def _parse_export(toks: list[Token], step: int) -> ExportNode:
     if len(toks) != 2:
         raise ParseError(
             f"Step {step} · export: expected a filename.\n"
-            f"  Example: export results.csv"
+            f"  Example: export results.csv",
+            pos=toks[0].pos,
         )
     filename = toks[1].value
     fmt = "json" if filename.endswith(".json") else "csv"
@@ -189,13 +214,15 @@ def _parse_chart(toks: list[Token], step: int) -> ChartNode:
     if len(toks) != 4:
         raise ParseError(
             f"Step {step} · chart: expected: chart <type> <x_column> <y_column>.\n"
-            f"  Example: chart bar month revenue"
+            f"  Example: chart bar month revenue",
+            pos=toks[0].pos,
         )
     chart_type = toks[1].value.lower()
     if chart_type not in _CHART_TYPES:
         raise ParseError(
             f"Step {step} · chart: unsupported type '{chart_type}'.\n"
-            f"  Supported: {', '.join(sorted(_CHART_TYPES))}"
+            f"  Supported: {', '.join(sorted(_CHART_TYPES))}",
+            pos=toks[1].pos,
         )
     return ChartNode(
         chart_type=chart_type,
@@ -232,7 +259,8 @@ def _parse_segment(toks: list[Token], step: int) -> object:
         raise ParseError(
             f"Step {step}: unknown command '{toks[0].value}'.\n"
             f"  Supported: load  filter  group by  sum  avg  count  "
-            f"sort  display  export  chart"
+            f"sort  display  export  chart",
+            pos=toks[0].pos,
         )
 
 

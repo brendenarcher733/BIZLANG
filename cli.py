@@ -187,7 +187,7 @@ class BizLangCLI:
         try:
             tokens = tokenize(source)
         except LexError as e:
-            self._error("Tokenization Error", str(e))
+            self._error("Tokenization Error", str(e), source=source, pos=e.pos)
             return
 
         self._show_tokens(tokens)
@@ -196,7 +196,7 @@ class BizLangCLI:
         try:
             pipeline = parse(source)
         except ParseError as e:
-            self._error("Parse Error", str(e))
+            self._error("Parse Error", str(e), source=source, pos=e.pos)
             return
 
         self._last_pipeline = pipeline
@@ -441,9 +441,20 @@ class BizLangCLI:
             padding=(0, 1),
         ))
 
-    def _error(self, title: str, message: str) -> None:
+    def _error(self, title: str, message: str,
+               source: str = "", pos: int = -1) -> None:
+        from rich.text import Text
+        body = Text()
+        body.append(message + "\n", style="red")
+
+        if source and pos >= 0:
+            col = pos + 1   # 1-indexed, matches editor convention
+            body.append(f"\n  {source}\n", style="dim")
+            body.append("  " + " " * pos + "^\n", style="bold red")
+            body.append(f"  column {col}", style="dim red")
+
         self.console.print(Panel(
-            f"[red]{message}[/red]",
+            body,
             title=f"[bold red]{title}[/bold red]",
             border_style="red",
             padding=(0, 2),

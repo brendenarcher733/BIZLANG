@@ -1,284 +1,181 @@
-# BizLang — Business Analytics Domain-Specific Language
+# BizLang
 
-A mini compiler project for a Programming Languages / Compilers course.  
-BizLang lets you write plain-English style analytics commands that are parsed
-into an AST and compiled into executable Python (pandas + matplotlib).
+> Analyze any dataset with plain-English commands. No SQL, no Python — just results.
 
----
+![BizLang Demo](demo.gif)
 
-## Project Overview
-
-BizLang is a pipeline-style DSL. Commands are chained with `|` (pipe), just
-like a Unix shell. Each command corresponds to one data transformation step:
-
-```
-load sales.csv | filter region = South | group by month | sum revenue | chart bar month revenue
-```
-
-The system has three stages:
-
-```
-BizLang Source → Parser → AST → Code Generator → Python Script → Execution
-```
+BizLang is a **pipeline-style domain-specific language (DSL)** that compiles plain-English analytics commands into executable Python. Type a query in the interactive REPL and get back a token breakdown, abstract syntax tree, execution plan, data table, chart, and a human-readable summary — all in one pass.
 
 ---
 
-## Project Structure
-
-```
-bizlang/
-│── main.py           Entry point — runs the full pipeline
-│── parser.py         Tokenises and parses BizLang into an AST
-│── ast_nodes.py      AST node class definitions
-│── codegen.py        Walks the AST, emits pandas + matplotlib code
-│── output.py         Generated file (created at runtime)
-│── chart_output.png  Generated chart (created at runtime)
-│── sample_data/
-│   └── sales.csv     Sample business data for demos
-└── README.md
-```
-
----
-
-## DSL Grammar (EBNF)
-
-```ebnf
-(* Top-level pipeline — one or more commands separated by "|" *)
-pipeline    = command , { "|" , command } ;
-
-(* A command is one of the supported keywords *)
-command     = load_cmd
-            | filter_cmd
-            | groupby_cmd
-            | aggregate_cmd
-            | chart_cmd ;
-
-(* Load a CSV file *)
-load_cmd    = "load" , filename ;
-filename    = string , ".csv" ;
-
-(* Filter rows by a column value *)
-filter_cmd  = "filter" , column , operator , value ;
-operator    = "=" | "!=" | ">" | "<" | ">=" | "<=" ;
-
-(* Group rows by a column *)
-groupby_cmd = "group" , "by" , column ;
-
-(* Aggregate a numeric column *)
-aggregate_cmd = ( "sum" | "avg" | "count" ) , column ;
-
-(* Render a chart — must be the last command *)
-chart_cmd   = "chart" , chart_type , column , column ;
-chart_type  = "bar" | "line" | "pie" ;
-
-(* Terminals *)
-column      = letter , { letter | digit | "_" } ;
-value       = string | number ;
-string      = { letter | digit | "_" | "-" } ;
-number      = [ "-" ] , digit , { digit } , [ "." , { digit } ] ;
-```
-
-### Pipeline Rules
-
-| Rule | Description |
-|------|-------------|
-| `load` must be first | Every pipeline must start with a load command |
-| `group by` before aggregation | groupby must precede sum / avg / count |
-| `chart` must be last | The chart command must be the final step |
-
----
-
-## AST Node Classes
-
-Defined in `ast_nodes.py`. Each node maps to one BizLang command.
-
-| Node | Fields | Example BizLang |
-|------|--------|-----------------|
-| `LoadNode` | `filename` | `load sales.csv` |
-| `FilterNode` | `column`, `operator`, `value` | `filter region = South` |
-| `GroupByNode` | `column` | `group by month` |
-| `AggregateNode` | `function`, `column` | `sum revenue` |
-| `ChartNode` | `chart_type`, `x_column`, `y_column` | `chart bar month revenue` |
-| `PipelineNode` | `steps` (list of nodes above) | *(root node)* |
-
-Every node has a `to_dict()` method so it can be printed as JSON.
-
----
-
-## How to Run
-
-### 1. Install dependencies
+## Quick Start
 
 ```bash
-pip install pandas matplotlib
-```
-
-### 2. Run the demo
-
-```bash
+git clone https://github.com/brendenarcher733/BIZLANG
+cd BIZLANG
+pip install -r requirements.txt
 python main.py
 ```
 
-This will:
-- Parse the hardcoded BizLang input
-- Print the AST as JSON
-- Print the generated Python code
-- Ask if you want to execute the generated code
-- Save a chart to `chart_output.png`
+---
 
-### 3. Try different examples
+## How It Works
 
-Open `main.py` and change the `BIZLANG_INPUT` variable:
-
-```python
-BIZLANG_INPUT = DEMO_1   # filter + bar chart
-BIZLANG_INPUT = DEMO_2   # avg + pie chart
-BIZLANG_INPUT = DEMO_3   # numeric filter + line chart
 ```
+Your Query
+    │
+    ▼  Lexer         tokenize into typed tokens with position info
+    ▼  Parser        build an Abstract Syntax Tree (AST)
+    ▼  Validator     semantic checks: load-first, group-before-agg, chart-last
+    ▼  Planner       generate a human-readable execution plan
+    ▼  Executor      run pandas operations directly — no temp files
+    ▼  Code Gen      emit a standalone Python script as a side-artifact
+    ▼  REPL          display tokens · AST · plan · results · chart · summary
+```
+
+Every step is surfaced to the user. BizLang is designed to be **transparent** — not a black box.
 
 ---
 
-## Example Input
+## Language
+
+Commands are chained with `|` (pipe). Each command is one transformation step.
 
 ```
-load sample_data/sales.csv | filter region = South | group by month | sum revenue | chart bar month revenue
+load sample_data/sales.csv
+    | filter region = West AND revenue > 100
+    | group by month
+    | sum revenue
+    | sort revenue desc
+    | chart bar month revenue
 ```
 
----
-
-## Example Output
-
-### Parser output
-
-```
-── Parsing BizLang Input ──────────────────────────────────────
-  Input: load sample_data/sales.csv | filter region = South | group by month | sum revenue | chart bar month revenue
-
-  Found 5 pipeline step(s):
-  Step 1: parsing 'load' command  → LoadNode(filename='sample_data/sales.csv')
-  Step 2: parsing 'filter' command → FilterNode(column='region', operator='=', value='South')
-  Step 3: parsing 'group' command  → GroupByNode(column='month')
-  Step 4: parsing 'sum' command    → AggregateNode(function='sum', column='revenue')
-  Step 5: parsing 'chart' command  → ChartNode(type='bar', x='month', y='revenue')
-```
-
-### AST (JSON)
-
-```json
-{
-  "node": "PipelineNode",
-  "steps": [
-    { "node": "LoadNode",      "filename": "sample_data/sales.csv" },
-    { "node": "FilterNode",    "column": "region", "operator": "=", "value": "South" },
-    { "node": "GroupByNode",   "column": "month" },
-    { "node": "AggregateNode", "function": "sum", "column": "revenue" },
-    { "node": "ChartNode",     "chart_type": "bar", "x_column": "month", "y_column": "revenue" }
-  ]
-}
-```
-
-### Generated Python code
-
-```python
-# Generated by BizLang Code Generator
-import pandas as pd
-import matplotlib.pyplot as plt
-
-# Step: load
-df = pd.read_csv("sample_data/sales.csv")
-
-# Step: filter region = South
-df = df[df["region"] == "South"]
-
-# Step: group by month
-_group_col = "month"
-
-# Step: sum revenue (with group by month)
-df = df.groupby(_group_col)["revenue"].sum().reset_index()
-
-# Step: chart bar month revenue
-plt.figure(figsize=(8, 5))
-plt.bar(df["month"], df["revenue"], color="steelblue", edgecolor="white")
-plt.xlabel("Month")
-plt.ylabel("Revenue")
-plt.title("Revenue by Month")
-plt.tight_layout()
-plt.savefig("chart_output.png")
-plt.show()
-```
-
-### Execution output
-
-```
-Loaded data:
-   month region  revenue  units
-0    Jan  South      100     10
-4    Feb  South       90      8
-8    Mar  South      150     18
-12   Apr  South      200     24
-
-After group by + sum:
-  month  revenue
-0   Apr      200
-1   Feb       90
-2   Jan      100
-3   Mar      150
-
-Chart saved to chart_output.png
-```
-
----
-
-## Design Decisions
-
-**Why a pipe-separated pipeline?**  
-It mirrors Unix pipelines which data analysts already understand intuitively.
-It also makes parsing trivial: split on `|`, parse each chunk independently.
-
-**Why hand-written parser instead of PLY/ANTLR?**  
-The grammar is simple enough that a hand-written recursive descent (actually
-just a dispatcher) is clearer and has zero external dependencies. It also
-makes the code generation logic more transparent for a course project.
-
-**Why deferred `group by` code generation?**  
-Pandas requires `groupby()` and `.agg()` to be chained together.
-The `GroupByNode` stores the column name without emitting code yet.
-The `AggregateNode` visitor picks it up and emits the full `groupby().sum()`
-call. This keeps the generated code idiomatic.
-
-**Why save to `output.py` then execute?**  
-It makes the compiler pipeline visible: you can inspect the generated code
-before running it, which is pedagogically clearer than `exec()`-ing it in memory.
-
----
-
-## Supported Commands
+### Command Reference
 
 | Command | Syntax | Example |
 |---------|--------|---------|
-| Load    | `load <file.csv>` | `load sales.csv` |
-| Filter  | `filter <col> <op> <val>` | `filter region = South` |
-| Group   | `group by <col>` | `group by month` |
-| Sum     | `sum <col>` | `sum revenue` |
-| Average | `avg <col>` | `avg revenue` |
-| Count   | `count <col>` | `count units` |
-| Chart   | `chart <type> <x> <y>` | `chart bar month revenue` |
+| **load** | `load <file.csv>` | `load sales.csv` |
+| **filter** | `filter <col> <op> <val> [AND\|OR ...]` | `filter region = West AND revenue > 50` |
+| **group by** | `group by <column>` | `group by month` |
+| **sum / avg / count** | `sum\|avg\|count <column>` | `sum revenue` |
+| **sort** | `sort <column> [asc\|desc]` | `sort revenue desc` |
+| **display** | `display [n]` | `display 10` |
+| **export** | `export <file.csv\|file.json>` | `export results.json` |
+| **chart** | `chart bar\|line\|pie <x> <y>` | `chart bar month revenue` |
 
 **Operators:** `=`  `!=`  `>`  `<`  `>=`  `<=`  
+**Logic:** `AND`  `OR` (chain multiple filter conditions)  
 **Chart types:** `bar`  `line`  `pie`
 
 ---
 
-## Limitations
+## REPL Commands
 
-- **One filter per pipeline.** Multiple filters would require extending
-  the grammar and adding logical operators (`AND`, `OR`).
-- **Single aggregation per pipeline.** You cannot do `sum revenue | avg units`
-  in one pipeline — run separate pipelines instead.
-- **No joins.** BizLang works with a single loaded CSV at a time.
-- **No column aliasing.** You cannot rename columns in the DSL.
-- **CSV only.** The `load` command only accepts `.csv` files.
-- **No ORDER BY.** Results are returned in the order pandas produces them.
+| Command | Description |
+|---------|-------------|
+| `/help` | Show the language reference |
+| `/demos` | Show 5 runnable example queries |
+| `/code` | Show generated Python for the last query |
+| `/clear` | Clear the screen |
+| `/quit` | Exit |
 
-These are intentional scope decisions for a student project — each limitation
-points to a clear extension path for future work.
+---
+
+## Error Messages
+
+BizLang reports errors with column-level precision — the same standard as production compilers:
+
+```
+╭─ Parse Error ──────────────────────────────────────────────────╮
+│  Step 2 · chart: unsupported type 'scatter'.                   │
+│    Supported: bar, line, pie                                   │
+│                                                                │
+│    load sales.csv | chart scatter month revenue                │
+│                           ^                                    │
+│    column 22                                                   │
+╰────────────────────────────────────────────────────────────────╯
+```
+
+---
+
+## Architecture
+
+```
+bizlang/
+├── lexer.py        Tokenizer — source string → typed Token list
+├── ast_nodes.py    AST node classes (Load, Filter, GroupBy, Aggregate,
+│                   Sort, Display, Export, Chart, Pipeline)
+├── parser.py       Recursive parser — tokens → PipelineNode AST
+│                   + semantic validation (load-first, group-before-agg)
+├── executor.py     Execution engine — AST → pandas operations (no subprocess)
+├── planner.py      Execution planner — AST → human-readable plan steps
+├── codegen.py      Code generator — AST → standalone Python script
+├── cli.py          Rich interactive REPL
+├── main.py         Entry point
+└── tests/
+    ├── test_lexer.py     19 tests — token types, operators, positions, errors
+    ├── test_parser.py    27 tests — all commands, validation rules, error cases
+    ├── test_executor.py  26 tests — load/filter/group/sort/export correctness
+    └── test_codegen.py   16 tests — generated Python validity and correctness
+```
+
+---
+
+## Test Suite
+
+```
+88 tests · 4 modules · ~0.3s
+```
+
+```bash
+python -m pytest -v
+```
+
+---
+
+## Grammar (EBNF)
+
+```ebnf
+pipeline      = command , { "|" , command } ;
+command       = load_cmd | filter_cmd | groupby_cmd | aggregate_cmd
+              | sort_cmd | display_cmd | export_cmd | chart_cmd ;
+
+load_cmd      = "load" , filename ;
+filter_cmd    = "filter" , condition , { ( "AND" | "OR" ) , condition } ;
+condition     = column , operator , value ;
+groupby_cmd   = "group" , "by" , column ;
+aggregate_cmd = ( "sum" | "avg" | "count" ) , column ;
+sort_cmd      = "sort" , column , [ "asc" | "desc" ] ;
+display_cmd   = "display" , [ number ] ;
+export_cmd    = "export" , filename ;
+chart_cmd     = "chart" , ( "bar" | "line" | "pie" ) , column , column ;
+
+operator      = "=" | "!=" | ">" | "<" | ">=" | "<=" ;
+filename      = identifier , ".csv" | identifier , ".json" ;
+```
+
+---
+
+## Pipeline Rules
+
+| Rule | Reason |
+|------|--------|
+| `load` must be first | Every pipeline needs a data source |
+| `group by` must precede aggregation | Matches pandas `.groupby().agg()` semantics |
+| `chart` must be last | Visualization is always a terminal step |
+
+---
+
+## Design Notes
+
+**Why pipe syntax?**  
+Mirrors Unix pipelines — data analysts already think this way. It also makes parsing trivial: split on `|`, parse each segment independently.
+
+**Why a hand-written parser over PLY/ANTLR?**  
+The grammar is simple enough that a dispatcher-based parser is clearer and has zero dependencies. Every parse function maps directly to one grammar rule.
+
+**Why direct execution over subprocess?**  
+The executor runs pandas in-process, capturing per-step row counts and snapshots. This enables the live summary, display checkpoints, and scalar results — none of which are possible with a subprocess model.
+
+**Why deferred `group by` code generation?**  
+Pandas requires `groupby()` and `.agg()` to be chained. `GroupByNode` stores the column without emitting code; `AggregateNode` picks it up and emits the full call. This keeps generated code idiomatic.

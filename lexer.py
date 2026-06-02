@@ -63,7 +63,9 @@ class Token:
 
 
 class LexError(Exception):
-    pass
+    def __init__(self, message: str, pos: int = -1):
+        super().__init__(message)
+        self.pos = pos
 
 
 def tokenize(source: str) -> List[Token]:
@@ -95,7 +97,7 @@ def tokenize(source: str) -> List[Token]:
             while j < n and source[j] != quote:
                 j += 1
             if j >= n:
-                raise LexError(f"Unterminated string literal at position {i}")
+                raise LexError(f"Unterminated string literal at position {i}", pos=i)
             tokens.append(Token(TokenType.IDENTIFIER, source[i+1:j], i))
             i = j + 1
             continue
@@ -120,7 +122,7 @@ def tokenize(source: str) -> List[Token]:
             i = j
             continue
 
-        raise LexError(f"Unexpected character '{source[i]}' at position {i}")
+        raise LexError(f"Unexpected character '{source[i]}'", pos=i)
 
     tokens.append(Token(TokenType.EOF, "", n))
     return tokens
