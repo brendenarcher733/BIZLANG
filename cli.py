@@ -24,6 +24,7 @@ from rich import box
 from lexer import tokenize, LexError, TokenType
 from parser import parse, ParseError
 from executor import Executor, ExecutionResult, ExecutionError
+from validator import SchemaValidator, ValidationError
 from planner import plan
 from codegen import CodeGenerator, CodeGenError
 from ast_nodes import PipelineNode
@@ -42,10 +43,12 @@ _ROLE_STYLE: dict[str, str] = {
 _OP_ICON: dict[str, str] = {
     "LOAD":    "◈",
     "FILTER":  "◎",
+    "SELECT":  "◇",
     "GROUP BY": "⊞",
     "SUM":     "∑",
     "AVG":     "∅",
     "COUNT":   "#",
+    "HAVING":  "⊙",
     "SORT":    "↕",
     "DISPLAY": "▦",
     "EXPORT":  "↗",
@@ -202,10 +205,17 @@ class BizLangCLI:
         self._last_pipeline = pipeline
         self._show_ast(pipeline)
 
-        # 3 · Execution plan ──────────────────────────────────────────────────
+        # 3 · Schema validation ───────────────────────────────────────────────
+        try:
+            SchemaValidator().validate(pipeline)
+        except ValidationError as e:
+            self._error("Schema Error", str(e))
+            return
+
+        # 4 · Execution plan ──────────────────────────────────────────────────
         self._show_plan(pipeline)
 
-        # 4 · Execute ─────────────────────────────────────────────────────────
+        # 5 · Execute ─────────────────────────────────────────────────────────
         self.console.print("  [dim]Executing…[/dim]")
         try:
             result = self._executor.execute(pipeline)

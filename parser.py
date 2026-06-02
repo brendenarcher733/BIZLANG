@@ -1,7 +1,7 @@
 from lexer import tokenize, Token, TokenType, LexError
 from ast_nodes import (
-    Condition, LoadNode, FilterNode, GroupByNode, AggregateNode,
-    SortNode, DisplayNode, ExportNode, ChartNode, PipelineNode,
+    Condition, LoadNode, FilterNode, SelectNode, GroupByNode, AggregateNode,
+    HavingNode, SortNode, DisplayNode, ExportNode, ChartNode, PipelineNode,
 )
 
 
@@ -18,6 +18,7 @@ _WORD_TYPES = {
     TokenType.LOAD, TokenType.FILTER, TokenType.GROUP, TokenType.BY,
     TokenType.SUM, TokenType.AVG, TokenType.COUNT,
     TokenType.SORT, TokenType.DISPLAY, TokenType.EXPORT, TokenType.CHART,
+    TokenType.SELECT, TokenType.HAVING,
     TokenType.ASC, TokenType.DESC,
 }
 
@@ -76,15 +77,18 @@ def _parse_load(toks: list[Token], step: int) -> LoadNode:
     return LoadNode(filename=filename)
 
 
-def _parse_filter(toks: list[Token], step: int) -> FilterNode:
+def _parse_conditions(
+    toks: list[Token], step: int, keyword: str
+) -> tuple[list[Condition], str]:
     """
-    Grammar:  filter <col> <op> <val> [ (AND|OR) <col> <op> <val> … ]
-    All conditions must share the same logic connector.
+    Shared logic for parsing one or more conditions from toks[1:].
+    Used by both 'filter' and 'having'.
+    Grammar:  <col> <op> <val> [ (AND|OR) <col> <op> <val> … ]
     """
-    ctx = f"Step {step} · filter"
+    ctx = f"Step {step} · {keyword}"
     conditions: list[Condition] = []
     logic = "AND"
-    i = 1  # skip FILTER keyword
+    i = 1  # skip keyword token
 
     while i < len(toks):
         if len(toks) - i < 3:
@@ -131,11 +135,56 @@ def _parse_filter(toks: list[Token], step: int) -> FilterNode:
 
     if not conditions:
         raise ParseError(
-            f"{ctx}: at least one condition is required.\n  Example: filter region = West",
+            f"{ctx}: at least one condition is required.\n"
+            f"  Example: {keyword} revenue > 500",
             pos=toks[0].pos,
         )
 
+    return conditions, logic
+
+
+def _parse_filter(toks: list[Token], step: int) -> FilterNode:
+    conditions, logic = _parse_conditions(toks, step, "filter")
     return FilterNode(conditions=conditions, logic=logic)
+
+
+def _parse_select(toks: list[Token], step: int) -> SelectNode:
+    """
+    Grammar:  select <col> [, <col> …]
+    Example:  select month, revenue, units
+    """
+    ctx = f"Step {step} · select"
+    if len(toks) < 2:
+        raise ParseError(
+            f"{ctx}: expected at least one column name.\n"
+            f"  Example: select month, revenue",
+            pos=toks[0].pos,
+        )
+    columns: list[str] = []
+    i = 1  # skip SELECT keyword
+    while i < len(toks):
+        tok = toks[i]
+        if tok.type not in _WORD_TYPES:
+            raise ParseError(
+                f"{ctx}: expected a column name, got '{tok.value}'",
+                pos=tok.pos,
+            )
+        columns.append(tok.value)
+        i += 1
+        if i < len(toks):
+            if toks[i].type is TokenType.COMMA:
+                i += 1
+            else:
+                raise ParseError(
+                    f"{ctx}: expected ',' between column names, got '{toks[i].value}'",
+                    pos=toks[i].pos,
+                )
+    return SelectNode(columns=columns)
+
+
+def _parse_having(toks: list[Token], step: int) -> HavingNode:
+    conditions, logic = _parse_conditions(toks, step, "having")
+    return HavingNode(conditions=conditions, logic=logic)
 
 
 def _parse_group_by(toks: list[Token], step: int) -> GroupByNode:
@@ -253,13 +302,17 @@ def _parse_segment(toks: list[Token], step: int) -> object:
         return _parse_display(toks, step)
     elif kw is TokenType.EXPORT:
         return _parse_export(toks, step)
+    elif kw is TokenType.SELECT:
+        return _parse_select(toks, step)
+    elif kw is TokenType.HAVING:
+        return _parse_having(toks, step)
     elif kw is TokenType.CHART:
         return _parse_chart(toks, step)
     else:
         raise ParseError(
             f"Step {step}: unknown command '{toks[0].value}'.\n"
-            f"  Supported: load  filter  group by  sum  avg  count  "
-            f"sort  display  export  chart",
+            f"  Supported: load  filter  select  group by  sum  avg  count  "
+            f"having  sort  display  export  chart",
             pos=toks[0].pos,
         )
 
@@ -290,6 +343,17 @@ def validate(pipeline: PipelineNode) -> None:
             seen_agg = True
         if isinstance(step, GroupByNode) and seen_agg:
             raise ParseError("'group by' must come before 'sum', 'avg', or 'count'.")
+
+    # HAVING must come after an aggregation
+    seen_agg = False
+    for step in steps:
+        if isinstance(step, AggregateNode):
+            seen_agg = True
+        if isinstance(step, HavingNode) and not seen_agg:
+            raise ParseError(
+                "'having' must come after an aggregation (sum, avg, or count).\n"
+                "  Use 'filter' to filter rows before aggregation."
+            )
 
 
 # ── Public entry point ────────────────────────────────────────────────────────

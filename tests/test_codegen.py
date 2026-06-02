@@ -101,3 +101,38 @@ def test_codegen_pie_chart():
 def test_codegen_chart_saves_file():
     code = _code("load x.csv | chart bar x y")
     assert "savefig" in code
+
+
+# ── SELECT codegen ────────────────────────────────────────────────────────────
+
+def test_codegen_select_single_column():
+    code = _code("load x.csv | select revenue")
+    assert '"revenue"' in code
+    py_ast.parse(code)
+
+
+def test_codegen_select_multiple_columns():
+    code = _code("load x.csv | select month, revenue")
+    assert '"month"' in code
+    assert '"revenue"' in code
+    py_ast.parse(code)
+
+
+# ── HAVING codegen ────────────────────────────────────────────────────────────
+
+def test_codegen_having_produces_valid_python():
+    code = _code("load x.csv | group by region | sum revenue | having revenue > 500")
+    py_ast.parse(code)
+
+
+def test_codegen_having_uses_correct_comparison():
+    code = _code("load x.csv | group by region | sum revenue | having revenue > 500")
+    assert "> 500" in code or ">500" in code
+
+
+def test_codegen_having_multi_condition_and():
+    code = _code(
+        "load x.csv | group by region | sum revenue | having revenue > 100 AND revenue < 600"
+    )
+    assert " & " in code
+    py_ast.parse(code)

@@ -10,8 +10,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from ast_nodes import (
-    LoadNode, FilterNode, GroupByNode, AggregateNode,
-    SortNode, DisplayNode, ExportNode, ChartNode, PipelineNode,
+    LoadNode, FilterNode, SelectNode, GroupByNode, AggregateNode,
+    HavingNode, SortNode, DisplayNode, ExportNode, ChartNode, PipelineNode,
 )
 
 
@@ -79,6 +79,20 @@ class Executor:
                     rows_before, len(df),
                 ))
 
+            elif isinstance(node, SelectNode):
+                missing = [c for c in node.columns if c not in df.columns]
+                if missing:
+                    raise ExecutionError(
+                        f"Column(s) not found: {', '.join(missing)}. "
+                        f"Available: {', '.join(df.columns)}"
+                    )
+                df = df[node.columns]
+                result.steps.append(StepResult(
+                    "SELECT",
+                    f"Projected to {len(node.columns)} column(s): {', '.join(node.columns)}",
+                    rows_before, len(df),
+                ))
+
             elif isinstance(node, GroupByNode):
                 if node.column not in df.columns:
                     raise ExecutionError(
@@ -118,6 +132,18 @@ class Executor:
                         f"{label} = {scalar:,.4g}",
                         rows_before, rows_before,
                     ))
+
+            elif isinstance(node, HavingNode):
+                df = self._apply_filter(df, node)   # same mask logic as FilterNode
+                cond_str = f" {node.logic} ".join(
+                    f"{c.column} {c.operator} {c.value}" for c in node.conditions
+                )
+                excluded = rows_before - len(df)
+                result.steps.append(StepResult(
+                    "HAVING",
+                    f"{len(df):,} groups kept ({excluded:,} excluded) — {cond_str}",
+                    rows_before, len(df),
+                ))
 
             elif isinstance(node, SortNode):
                 if node.column not in df.columns:

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from ast_nodes import (
-    LoadNode, FilterNode, GroupByNode, AggregateNode,
-    SortNode, DisplayNode, ExportNode, ChartNode, PipelineNode,
+    LoadNode, FilterNode, SelectNode, GroupByNode, AggregateNode,
+    HavingNode, SortNode, DisplayNode, ExportNode, ChartNode, PipelineNode,
 )
 
 
@@ -32,6 +32,10 @@ def plan(pipeline: PipelineNode) -> list[PlanStep]:
             steps.append(PlanStep(i, "FILTER",
                 f"Keep only rows where {conds}"))
 
+        elif isinstance(node, SelectNode):
+            steps.append(PlanStep(i, "SELECT",
+                f"Project to columns: {', '.join(node.columns)}"))
+
         elif isinstance(node, GroupByNode):
             steps.append(PlanStep(i, "GROUP BY",
                 f"Group rows by the '{node.column}' column"))
@@ -40,6 +44,13 @@ def plan(pipeline: PipelineNode) -> list[PlanStep]:
             label = {"sum": "Sum", "avg": "Average", "count": "Count"}[node.function]
             steps.append(PlanStep(i, node.function.upper(),
                 f"{label} the '{node.column}' column within each group"))
+
+        elif isinstance(node, HavingNode):
+            conds = f" {node.logic} ".join(
+                f"{c.column} {c.operator} {c.value}" for c in node.conditions
+            )
+            steps.append(PlanStep(i, "HAVING",
+                f"Keep only groups where {conds}"))
 
         elif isinstance(node, SortNode):
             direction = "highest to lowest" if node.order == "desc" else "lowest to highest"

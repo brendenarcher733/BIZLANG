@@ -68,6 +68,36 @@ class AggregateNode:
         return f"AggregateNode(function='{self.function}', column='{self.column}')"
 
 
+class SelectNode:
+    """Project a subset of columns: select col1, col2, ..."""
+    def __init__(self, columns: List[str]):
+        self.columns = columns
+
+    def to_dict(self) -> dict:
+        return {"node": "SelectNode", "columns": self.columns}
+
+    def __repr__(self) -> str:
+        return f"SelectNode(columns={self.columns!r})"
+
+
+class HavingNode:
+    """Post-aggregation filter — identical syntax to FilterNode."""
+    def __init__(self, conditions: List[Condition], logic: str = "AND"):
+        self.conditions = conditions
+        self.logic = logic.upper()
+
+    def to_dict(self) -> dict:
+        return {
+            "node":       "HavingNode",
+            "logic":      self.logic,
+            "conditions": [c.to_dict() for c in self.conditions],
+        }
+
+    def __repr__(self) -> str:
+        parts = f" {self.logic} ".join(repr(c) for c in self.conditions)
+        return f"HavingNode({parts})"
+
+
 class SortNode:
     def __init__(self, column: str, order: str = "asc"):
         self.column = column

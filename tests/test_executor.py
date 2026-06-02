@@ -187,3 +187,66 @@ def test_full_pipeline_produces_correct_groups(ex, csv_path):
     assert list(r.df.columns) == ["month", "revenue"]
     assert len(r.df) == 4
     assert r.df["revenue"].iloc[0] == 200   # Apr should be first after desc sort
+
+
+# ── SELECT ────────────────────────────────────────────────────────────────────
+
+def test_select_projects_columns(ex, csv_path):
+    r = ex.execute(parse(f"load {csv_path} | select month, revenue"))
+    assert list(r.df.columns) == ["month", "revenue"]
+
+
+def test_select_drops_unselected_columns(ex, csv_path):
+    r = ex.execute(parse(f"load {csv_path} | select month, revenue"))
+    assert "region" not in r.df.columns
+    assert "units" not in r.df.columns
+
+
+def test_select_preserves_row_count(ex, csv_path):
+    r = ex.execute(parse(f"load {csv_path} | select revenue"))
+    assert len(r.df) == TOTAL_ROWS
+
+
+def test_select_step_result(ex, csv_path):
+    r = ex.execute(parse(f"load {csv_path} | select month, revenue"))
+    step = next(s for s in r.steps if s.operation == "SELECT")
+    assert "2 column" in step.description
+
+
+def test_select_bad_column_raises(ex, csv_path):
+    with pytest.raises(ExecutionError, match="not found"):
+        ex.execute(parse(f"load {csv_path} | select month, bogus"))
+
+
+# ── HAVING ────────────────────────────────────────────────────────────────────
+
+def test_having_filters_groups(ex, csv_path):
+    r = ex.execute(parse(
+        f"load {csv_path} | group by region | sum revenue | having revenue > 550"
+    ))
+    assert (r.df["revenue"] > 550).all()
+
+
+def test_having_keeps_correct_groups(ex, csv_path):
+    # South total = 540, North total = 600 — having > 550 should keep only North
+    r = ex.execute(parse(
+        f"load {csv_path} | group by region | sum revenue | having revenue > 550"
+    ))
+    assert list(r.df["region"]) == ["North"]
+
+
+def test_having_step_result(ex, csv_path):
+    r = ex.execute(parse(
+        f"load {csv_path} | group by region | sum revenue | having revenue > 550"
+    ))
+    step = next(s for s in r.steps if s.operation == "HAVING")
+    assert step.rows_before == 2
+    assert step.rows_after == 1
+
+
+def test_having_with_sort(ex, csv_path):
+    r = ex.execute(parse(
+        f"load {csv_path} | group by region | sum revenue | having revenue > 0 | sort revenue desc"
+    ))
+    vals = list(r.df["revenue"])
+    assert vals == sorted(vals, reverse=True)

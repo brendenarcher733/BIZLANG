@@ -7,9 +7,10 @@ class TokenType(Enum):
     LOAD = auto();    FILTER = auto();  GROUP = auto();   BY = auto()
     SUM = auto();     AVG = auto();     COUNT = auto()
     SORT = auto();    DISPLAY = auto(); EXPORT = auto();  CHART = auto()
+    SELECT = auto();  HAVING = auto()
     AND = auto();     OR = auto();      ASC = auto();     DESC = auto()
     EQ = auto();      NEQ = auto();     GT = auto();      LT = auto()
-    GTE = auto();     LTE = auto();     PIPE = auto()
+    GTE = auto();     LTE = auto();     PIPE = auto();    COMMA = auto()
     IDENTIFIER = auto(); NUMBER = auto(); EOF = auto()
 
 
@@ -19,7 +20,8 @@ _KEYWORDS: dict[str, TokenType] = {
     "sum":   TokenType.SUM,       "avg":    TokenType.AVG,
     "count": TokenType.COUNT,     "sort":   TokenType.SORT,
     "display": TokenType.DISPLAY, "export": TokenType.EXPORT,
-    "chart": TokenType.CHART,     "and":    TokenType.AND,
+    "chart": TokenType.CHART,     "select": TokenType.SELECT,
+    "having": TokenType.HAVING,   "and":    TokenType.AND,
     "or":    TokenType.OR,        "asc":    TokenType.ASC,
     "desc":  TokenType.DESC,
 }
@@ -27,7 +29,7 @@ _KEYWORDS: dict[str, TokenType] = {
 _OPERATORS: dict[str, TokenType] = {
     "!=": TokenType.NEQ, ">=": TokenType.GTE, "<=": TokenType.LTE,
     "=":  TokenType.EQ,  ">":  TokenType.GT,  "<":  TokenType.LT,
-    "|":  TokenType.PIPE,
+    "|":  TokenType.PIPE,  ",": TokenType.COMMA,
 }
 
 _ROLE: dict[TokenType, str] = {
@@ -36,13 +38,14 @@ _ROLE: dict[TokenType, str] = {
     TokenType.SUM: "keyword",     TokenType.AVG: "keyword",
     TokenType.COUNT: "keyword",   TokenType.SORT: "keyword",
     TokenType.DISPLAY: "keyword", TokenType.EXPORT: "keyword",
-    TokenType.CHART: "keyword",   TokenType.AND: "keyword",
+    TokenType.CHART: "keyword",   TokenType.SELECT: "keyword",
+    TokenType.HAVING: "keyword",  TokenType.AND: "keyword",
     TokenType.OR: "keyword",      TokenType.ASC: "keyword",
     TokenType.DESC: "keyword",
     TokenType.EQ: "operator",     TokenType.NEQ: "operator",
     TokenType.GT: "operator",     TokenType.LT: "operator",
     TokenType.GTE: "operator",    TokenType.LTE: "operator",
-    TokenType.PIPE: "separator",
+    TokenType.PIPE: "separator",  TokenType.COMMA: "separator",
     TokenType.IDENTIFIER: "identifier",
     TokenType.NUMBER: "number",
     TokenType.EOF: "eof",

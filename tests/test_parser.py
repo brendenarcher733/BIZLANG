@@ -1,8 +1,8 @@
 import pytest
 from parser import parse, ParseError
 from ast_nodes import (
-    LoadNode, FilterNode, GroupByNode, AggregateNode,
-    SortNode, DisplayNode, ExportNode, ChartNode,
+    LoadNode, FilterNode, SelectNode, GroupByNode, AggregateNode,
+    HavingNode, SortNode, DisplayNode, ExportNode, ChartNode,
 )
 
 
@@ -196,3 +196,55 @@ def test_error_filter_missing_operator():
 def test_error_empty_pipeline():
     with pytest.raises(ParseError):
         parse("")
+
+
+# ── SELECT ────────────────────────────────────────────────────────────────────
+
+def test_parse_select_single_column():
+    p = parse("load x.csv | select revenue")
+    s = p.steps[1]
+    assert isinstance(s, SelectNode)
+    assert s.columns == ["revenue"]
+
+
+def test_parse_select_multiple_columns():
+    p = parse("load x.csv | select month, revenue, units")
+    assert p.steps[1].columns == ["month", "revenue", "units"]
+
+
+def test_parse_select_preserves_order():
+    p = parse("load x.csv | select c, a, b")
+    assert p.steps[1].columns == ["c", "a", "b"]
+
+
+def test_parse_select_missing_columns_raises():
+    with pytest.raises(ParseError):
+        parse("load x.csv | select")
+
+
+# ── HAVING ────────────────────────────────────────────────────────────────────
+
+def test_parse_having_single_condition():
+    p = parse("load x.csv | group by region | sum revenue | having revenue > 500")
+    h = p.steps[3]
+    assert isinstance(h, HavingNode)
+    assert h.conditions[0].column == "revenue"
+    assert h.conditions[0].operator == ">"
+    assert h.conditions[0].value == "500"
+
+
+def test_parse_having_multi_and():
+    p = parse("load x.csv | group by region | sum revenue | having revenue > 100 AND revenue < 600")
+    h = p.steps[3]
+    assert h.logic == "AND"
+    assert len(h.conditions) == 2
+
+
+def test_parse_having_or():
+    p = parse("load x.csv | group by region | sum revenue | having revenue < 100 OR revenue > 500")
+    assert p.steps[3].logic == "OR"
+
+
+def test_error_having_before_aggregation():
+    with pytest.raises(ParseError, match="having"):
+        parse("load x.csv | having revenue > 500")

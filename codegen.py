@@ -1,6 +1,6 @@
 from ast_nodes import (
-    LoadNode, FilterNode, GroupByNode, AggregateNode,
-    SortNode, DisplayNode, ExportNode, ChartNode, PipelineNode,
+    LoadNode, FilterNode, SelectNode, GroupByNode, AggregateNode,
+    HavingNode, SortNode, DisplayNode, ExportNode, ChartNode, PipelineNode,
 )
 
 
@@ -34,11 +34,15 @@ class CodeGenerator:
             if isinstance(step, LoadNode):
                 lines.extend(self._visit_load(step))
             elif isinstance(step, FilterNode):
-                lines.extend(self._visit_filter(step))
+                lines.extend(self._visit_conditions(step, "filter"))
+            elif isinstance(step, SelectNode):
+                lines.extend(self._visit_select(step))
             elif isinstance(step, GroupByNode):
                 lines.extend(self._visit_group_by(step))
             elif isinstance(step, AggregateNode):
                 lines.extend(self._visit_aggregate(step))
+            elif isinstance(step, HavingNode):
+                lines.extend(self._visit_conditions(step, "having"))
             elif isinstance(step, SortNode):
                 lines.extend(self._visit_sort(step))
             elif isinstance(step, DisplayNode):
@@ -82,27 +86,39 @@ class CodeGenerator:
             '',
         ]
 
-    def _visit_filter(self, node: FilterNode) -> list[str]:
-        py_op_map = {"=": "==", "!=": "!=", ">": ">", "<": "<", ">=": ">=", "<=": "<="}
+    def _visit_conditions(self, node, label: str) -> list[str]:
+        """Shared codegen for FilterNode and HavingNode."""
+        _py_op = {"=": "==", "!=": "!=", ">": ">", "<": "<", ">=": ">=", "<=": "<="}
         parts = []
         for cond in node.conditions:
-            py_op = py_op_map[cond.operator]
             try:
                 float(cond.value)
                 py_val = cond.value
             except ValueError:
                 py_val = f'"{cond.value}"'
-            parts.append(f'(df["{cond.column}"] {py_op} {py_val})')
+            parts.append(f'(df["{cond.column}"] {_py_op[cond.operator]} {py_val})')
 
         connector = " & " if node.logic == "AND" else " | "
         mask_expr = connector.join(parts)
         desc = f" {node.logic} ".join(
             f"{c.column} {c.operator} {c.value}" for c in node.conditions
         )
+        unit = "groups" if label == "having" else "rows"
         return [
-            f"# ── filter: {desc} ──",
+            f"# ── {label}: {desc} ──",
             f"df = df[{mask_expr}]",
-            f'print(f"After filter — {{len(df):,}} rows remain")',
+            f'print(f"After {label} — {{len(df):,}} {unit} remain")',
+            'print(df)',
+            'print()',
+            '',
+        ]
+
+    def _visit_select(self, node: SelectNode) -> list[str]:
+        col_list = '", "'.join(node.columns)
+        return [
+            f'# ── select {", ".join(node.columns)} ──',
+            f'df = df[["{col_list}"]]',
+            f'print("Columns: {", ".join(node.columns)}")',
             'print(df)',
             'print()',
             '',
