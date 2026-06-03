@@ -36,15 +36,31 @@ class SchemaValidator:
         assert isinstance(load, LoadNode)
 
         try:
-            headers = pd.read_csv(load.filename, nrows=0)
-            self._schema = list(headers.columns)
-        except FileNotFoundError:
-            raise ValidationError(f"File not found: '{load.filename}'")
+            self._schema = self._read_headers(load.filename)
+        except ValidationError:
+            raise
         except Exception as exc:
             raise ValidationError(f"Cannot read '{load.filename}': {exc}")
 
         for node in pipeline.steps[1:]:
             self._check(node)
+
+    @staticmethod
+    def _read_headers(filename: str) -> list[str]:
+        dot = filename.rfind(".")
+        ext = filename[dot:].lower() if dot >= 0 else ""
+        try:
+            if ext in (".xlsx", ".xls"):
+                df = pd.read_excel(filename, nrows=0)
+            elif ext == ".json":
+                df = pd.read_json(filename).iloc[0:0]
+            elif ext == ".tsv":
+                df = pd.read_csv(filename, sep="\t", nrows=0)
+            else:
+                df = pd.read_csv(filename, nrows=0)
+            return list(df.columns)
+        except FileNotFoundError:
+            raise ValidationError(f"File not found: '{filename}'")
 
     # ── Per-node checks ───────────────────────────────────────────────────────
 

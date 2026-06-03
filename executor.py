@@ -55,12 +55,7 @@ class Executor:
             rows_before = len(df)
 
             if isinstance(node, LoadNode):
-                try:
-                    df = pd.read_csv(node.filename)
-                except FileNotFoundError:
-                    raise ExecutionError(f"File not found: '{node.filename}'")
-                except Exception as e:
-                    raise ExecutionError(f"Failed to load '{node.filename}': {e}")
+                df = self._read_file(node.filename)
                 result.steps.append(StepResult(
                     "LOAD",
                     f"Loaded {len(df):,} rows · {len(df.columns)} columns from '{node.filename}'",
@@ -199,6 +194,25 @@ class Executor:
         return result
 
     # ── Internals ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _read_file(filename: str) -> pd.DataFrame:
+        """Load any supported format into a DataFrame, with a clean error on failure."""
+        dot = filename.rfind(".")
+        ext = filename[dot:].lower() if dot >= 0 else ""
+        try:
+            if ext in (".xlsx", ".xls"):
+                return pd.read_excel(filename)
+            elif ext == ".json":
+                return pd.read_json(filename)
+            elif ext == ".tsv":
+                return pd.read_csv(filename, sep="\t")
+            else:
+                return pd.read_csv(filename)
+        except FileNotFoundError:
+            raise ExecutionError(f"File not found: '{filename}'")
+        except Exception as exc:
+            raise ExecutionError(f"Failed to load '{filename}': {exc}")
 
     def _apply_filter(self, df: pd.DataFrame, node: FilterNode) -> pd.DataFrame:
         def _mask(cond):

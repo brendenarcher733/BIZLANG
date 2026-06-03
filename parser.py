@@ -69,9 +69,13 @@ def _parse_load(toks: list[Token], step: int) -> LoadNode:
             pos=toks[0].pos,
         )
     filename = toks[1].value
-    if not filename.endswith(".csv"):
+    dot = filename.rfind(".")
+    ext = filename[dot:].lower() if dot >= 0 else ""
+    _SUPPORTED = {".csv", ".tsv", ".json", ".xlsx", ".xls"}
+    if ext not in _SUPPORTED:
         raise ParseError(
-            f"Step {step} · load: only .csv files are supported. Got '{filename}'",
+            f"Step {step} · load: unsupported format '{ext or filename}'.\n"
+            f"  Supported: {', '.join(sorted(_SUPPORTED))}",
             pos=toks[1].pos,
         )
     return LoadNode(filename=filename)

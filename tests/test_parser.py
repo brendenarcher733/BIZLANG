@@ -20,8 +20,23 @@ def test_parse_load_nested_path():
 
 
 def test_parse_load_non_csv_raises():
-    with pytest.raises(ParseError, match=".csv"):
-        parse("load data.xlsx")
+    with pytest.raises(ParseError, match="unsupported"):
+        parse("load data.parquet")
+
+
+def test_parse_load_json():
+    p = parse("load data.json")
+    assert p.steps[0].filename == "data.json"
+
+
+def test_parse_load_tsv():
+    p = parse("load data.tsv")
+    assert p.steps[0].filename == "data.tsv"
+
+
+def test_parse_load_xlsx():
+    p = parse("load report.xlsx")
+    assert p.steps[0].filename == "report.xlsx"
 
 
 # ── FILTER ────────────────────────────────────────────────────────────────────

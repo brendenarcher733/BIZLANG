@@ -1,5 +1,5 @@
 import pytest
-from lexer import tokenize, Token, TokenType, LexError
+from lexer import tokenize, TokenType, LexError
 
 
 def _types(source: str) -> list[TokenType]:
@@ -14,17 +14,38 @@ def test_load_keyword():
 
 def test_all_keywords_recognised():
     cases = {
-        "load": TokenType.LOAD,    "filter": TokenType.FILTER,
-        "group": TokenType.GROUP,  "by":     TokenType.BY,
-        "sum":   TokenType.SUM,    "avg":    TokenType.AVG,
-        "count": TokenType.COUNT,  "sort":   TokenType.SORT,
-        "display": TokenType.DISPLAY, "export": TokenType.EXPORT,
-        "chart": TokenType.CHART,  "and":    TokenType.AND,
-        "or":    TokenType.OR,     "asc":    TokenType.ASC,
+        "load": TokenType.LOAD,       "filter":  TokenType.FILTER,
+        "group": TokenType.GROUP,     "by":      TokenType.BY,
+        "sum":   TokenType.SUM,       "avg":     TokenType.AVG,
+        "count": TokenType.COUNT,     "sort":    TokenType.SORT,
+        "display": TokenType.DISPLAY, "export":  TokenType.EXPORT,
+        "chart": TokenType.CHART,     "select":  TokenType.SELECT,
+        "having": TokenType.HAVING,   "and":     TokenType.AND,
+        "or":    TokenType.OR,        "asc":     TokenType.ASC,
         "desc":  TokenType.DESC,
     }
     for word, expected in cases.items():
         assert tokenize(word)[0].type is expected, f"'{word}' should be {expected.name}"
+
+
+def test_select_keyword():
+    assert tokenize("select")[0].type is TokenType.SELECT
+
+
+def test_having_keyword():
+    assert tokenize("having")[0].type is TokenType.HAVING
+
+
+def test_comma_separator():
+    tokens = [t for t in tokenize("a, b, c") if t.type is not TokenType.EOF]
+    comma_count = sum(1 for t in tokens if t.type is TokenType.COMMA)
+    assert comma_count == 2
+
+
+def test_comma_role_label():
+    tok = tokenize(",")[0]
+    assert tok.type is TokenType.COMMA
+    assert tok.role() == "separator"
 
 
 def test_keywords_case_insensitive():

@@ -6,7 +6,7 @@ import pandas as pd
 
 from parser import parse
 from executor import Executor, ExecutionError
-from tests.conftest import SOUTH_ROWS, TOTAL_ROWS, SOUTH_REVENUE, TOTAL_REVENUE
+from tests.conftest import _DATA, SOUTH_ROWS, TOTAL_ROWS, SOUTH_REVENUE, TOTAL_REVENUE
 
 
 @pytest.fixture
@@ -250,3 +250,39 @@ def test_having_with_sort(ex, csv_path):
     ))
     vals = list(r.df["revenue"])
     assert vals == sorted(vals, reverse=True)
+
+
+# ── Multi-format loading (#8) ─────────────────────────────────────────────────
+
+def test_load_tsv_file(ex, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pd.DataFrame(_DATA).to_csv("data.tsv", sep="\t", index=False)
+    r = ex.execute(parse("load data.tsv"))
+    assert r.df.shape == (TOTAL_ROWS, 4)
+    assert list(r.df.columns) == ["month", "region", "revenue", "units"]
+
+
+def test_load_json_file(ex, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pd.DataFrame(_DATA).to_json("data.json", orient="records")
+    r = ex.execute(parse("load data.json"))
+    assert r.df.shape == (TOTAL_ROWS, 4)
+
+
+def test_load_xlsx_file(ex, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pd.DataFrame(_DATA).to_excel("data.xlsx", index=False)
+    r = ex.execute(parse("load data.xlsx"))
+    assert r.df.shape == (TOTAL_ROWS, 4)
+
+
+def test_tsv_pipeline_with_filter(ex, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pd.DataFrame(_DATA).to_csv("data.tsv", sep="\t", index=False)
+    r = ex.execute(parse("load data.tsv | filter region = South"))
+    assert len(r.df) == SOUTH_ROWS
+
+
+def test_unsupported_format_raises(ex):
+    with pytest.raises(Exception):
+        ex.execute(parse("load data.parquet"))
