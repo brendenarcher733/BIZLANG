@@ -1,6 +1,6 @@
 # BizLang
 
-> Analyze any dataset with plain-English commands. No SQL, no Python — just results.
+> Analyze any dataset with plain-English commands. No SQL, no Python, just results.
 
 ![BizLang Demo](demo.gif)
 
